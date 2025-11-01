@@ -92,9 +92,14 @@ void ProcessInitialization(std::vector<double>& pData, int& dataSize,
         // Resize the main data vector (only on rank 0)
         pData.resize(dataSize);
 
-        // Initialize the data (using the lab's dummy method for easy verification)
+        // Initialize the data
+        // Create a random number generator
+        std::mt19937 gen(std::chrono::system_clock::now().time_since_epoch().count());
+        std::uniform_real_distribution<double> dist(0.0, 1000000.0); // Random doubles between 0 and 1,000,000
+
+        // Fill the vector with random numbers
         for (size_t i = 0; i < dataSize; ++i) {
-            pData[i] = static_cast<double>(dataSize - i);
+            pData[i] = dist(gen);
         }
     }
 }
@@ -164,7 +169,7 @@ void ParallelSort(std::vector<double>& pProcData) {
     std::vector<double> pDualData;
     std::vector<double> pMergedData;
 
-    // 2. Main parallel odd-even sort loop
+    // Main parallel odd-even sort loop
     for (int i = 0; i < procNum; ++i) {
         int offset;
         splitMode mode;
@@ -266,24 +271,14 @@ void PrintData(const std::vector<double>& data, const std::string& title) {
  * 2. Sorts the copy serially using std::sort.
  * 3. Compares the serial result with the parallel result (pData).
  */
-void TestResult(std::vector<double>& pData, int dataSize,
-                const std::vector<double>& pUnsortedData) {
+void TestResult(const std::vector<double>& pData,
+                const std::vector<double>& serialData) {
     if (procRank == 0) {
-        std::vector<double> serialData = pUnsortedData;
-
-        // Sort the copied data serially for comparison
-        std::sort(serialData.begin(), serialData.end());
-
         // Compare the parallel-sorted vector with the serial-sorted vector
         if (std::equal(pData.begin(), pData.end(), serialData.begin())) {
             std::cout << "\n[SUCCESS] The results of serial and parallel algorithms are identical.\n";
         } else {
             std::cout << "\n[FAILURE] The results of serial and parallel algorithms are NOT identical.\n";
-        }
-
-        if (dataSize <= 100) {
-            PrintData(pData, "Parallel Sorted Result");
-            PrintData(serialData, "Serial Sorted Result");
         }
     }
 }
@@ -299,19 +294,36 @@ int main(int argc, char* argv[]) {
     std::vector<double> pData;       // Holds the full data array (only on rank 0)
     std::vector<double> pProcData;   // Holds the local data block (on all ranks)
     std::vector<double> pUnsortedData; // Copy for testing (only on rank 0)
+    std::vector<double> serialData;    // Holds serial sort result (only on rank 0)
 
-    double start, finish, duration;
+    double p_start, p_finish, p_duration; // Parallel timer
+    double s_start, s_finish, s_duration; // Serial timer
 
     // Initialization
     ProcessInitialization(pData, dataSize, pProcData, blockSize);
 
     if (procRank == 0) {
-        pUnsortedData = pData; // Make a copy for later testing
+        pUnsortedData = pData; // Make a copy for testing and serial sort
+        serialData = pUnsortedData; // Copy for the serial sort
+
+        std::cout << "Running serial std::sort on Rank 0...\n";
+        s_start = MPI_Wtime();
+
+        // Run Serial Sort (on Rank 0 only)
+        std::sort(serialData.begin(), serialData.end());
+
+        s_finish = MPI_Wtime();
+        s_duration = s_finish - s_start;
+        std::cout << "Serial std::sort time: " << s_duration << " seconds\n";
     }
 
-    // Synchronize before starting the timer
+    // Synchronize before starting the parallel timer
     MPI_Barrier(MPI_COMM_WORLD);
-    start = MPI_Wtime();
+
+    if (procRank == 0) {
+        std::cout << "Running parallel sort on " << procNum << " processes...\n";
+    }
+    p_start = MPI_Wtime();
 
     // Data Distribution
     DataDistribution(pData, dataSize, pProcData, blockSize);
@@ -324,15 +336,17 @@ int main(int argc, char* argv[]) {
 
     // Synchronize before stopping the timer
     MPI_Barrier(MPI_COMM_WORLD);
-    finish = MPI_Wtime();
-    duration = finish - start;
+    p_finish = MPI_Wtime();
+    p_duration = p_finish - p_start;
 
     if (procRank == 0) {
-        std::cout << "Time of execution: " << duration << " seconds\n";
+        std::cout << "\n--- Results ---\n";
+        std::cout << "Serial std::sort time: " << s_duration << " seconds\n";
+        std::cout << "Parallel sort time:    " << p_duration << " seconds\n";
     }
 
     // Test Results
-    TestResult(pData, dataSize, pUnsortedData);
+    TestResult(pData, serialData);
 
     // Finalize
     MPI_Finalize();
