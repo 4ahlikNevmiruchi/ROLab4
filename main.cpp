@@ -343,6 +343,8 @@ int main(int argc, char* argv[]) {
         std::cout << "\n--- Results ---\n";
         std::cout << "Serial std::sort time: " << s_duration << " seconds\n";
         std::cout << "Parallel sort time:    " << p_duration << " seconds\n";
+        double speedup = s_duration / p_duration;
+        std::cout << "\nSpeedup: " << speedup << std::endl;
     }
 
     // Test Results
